@@ -31,7 +31,12 @@ class RabbitBroker:
     PREFIX = config.RABBIT_QUEUE_PREFIX
     Q = f"{PREFIX}.ventes"
     RETRY = f"{PREFIX}.ventes.retry"
-    RETRIES = tuple(f"{PREFIX}.ventes.retry.{n}" for n in range(1, config.MAX_RETRIES + 1))
+    # Une compréhension de classe ne voit pas les attributs locaux de la
+    # classe pendant son évaluation : utiliser directement la configuration.
+    RETRIES = tuple(
+        f"{config.RABBIT_QUEUE_PREFIX}.ventes.retry.{n}"
+        for n in range(1, config.MAX_RETRIES + 1)
+    )
     DLQ = f"{PREFIX}.ventes.dlq"
 
     def __init__(self):
