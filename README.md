@@ -19,9 +19,9 @@ provoquer une republication, mais l'idempotence empêche une double comptabilisa
 - catalogue et stocks administrables ;
 - simulation de coupure ;
 - healthchecks et métriques ;
-- sauvegarde et vérification SQLite ;
-- mode local pour les tests sans RabbitMQ.
-- en-têtes HTTP de sécurité et cookies de session durcis.
+- sauvegarde et vérification SQLite/PostgreSQL ;
+- mode local pour les tests sans RabbitMQ ;
+- en-têtes HTTP de sécurité et cookies de session durcis ;
 - identifiant X-Request-ID pour corréler les appels et incidents.
 - journal HTTP avec statut et durée de chaque requête.
 - initialisation PostgreSQL protégée contre les courses entre workers.
@@ -43,7 +43,10 @@ provoquer une republication, mais l'idempotence empêche une double comptabilisa
     Base siège : ventes, lignes, stock, événements
 
 En production, le web, le consommateur et chaque agent caisse sont des
-processus séparés.
+processus séparés. La caisse applique le pattern *store and forward* : la
+vente est validée, fusionnée et écrite dans l'outbox avant toute publication.
+Le siège traite les messages dans une transaction atomique (vente, lignes,
+stock et idempotence).
 
 ## Prérequis
 
@@ -84,8 +87,9 @@ Démarrer RabbitMQ :
 
     docker compose up -d --wait
 
-RabbitMQ est disponible sur le port AMQP 5672 et la console sur
-http://localhost:15672 avec guest/guest.
+RabbitMQ est disponible sur le port AMQP 5672. Avec la composition de
+services, la console est sur http://localhost:15672 et utilise
+`RABBITMQ_USER`/`RABBITMQ_PASSWORD`.
 
 Lancer l'application :
 
@@ -116,6 +120,7 @@ Le fichier docker-compose.services.yml lance RabbitMQ, le web, le
 consommateur et trois agents caisse (ABJ01, BKE01 et KOR01).
 
     export COCO_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    export COCO_BOOTSTRAP_ADMIN_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(18))')"
     export RABBITMQ_USER=cocomarket
     export RABBITMQ_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
     docker compose -f docker-compose.services.yml up -d --build
@@ -124,9 +129,11 @@ Arrêt :
 
     docker compose -f docker-compose.services.yml down
 
-La composition lance PostgreSQL pour la base centrale et conserve SQLite pour
-les outbox locales. Le mot de passe PostgreSQL de démonstration doit être
-remplacé dans le fichier Compose avant une exposition réseau.
+La composition lance PostgreSQL pour la base centrale, RabbitMQ, Prometheus,
+le web, le consommateur et trois agents caisse. Elle applique des
+healthchecks, des redémarrages automatiques et des délais d'arrêt propres.
+SQLite reste utilisé pour les outbox locales. Définir aussi
+`POSTGRES_PASSWORD` avant le démarrage.
 
 Migration PostgreSQL : démarrer PostgreSQL, définir DATABASE_URL, puis lancer
 la commande suivante depuis une copie de sauvegarde :
@@ -177,14 +184,18 @@ ruptures.
 
 Utilisateurs permet de créer, désactiver et réinitialiser les comptes.
 
-## Supervision
+## Supervision et observabilité
 
     GET /health/live
     GET /health/ready
     GET /metrics
 
-ready vérifie la base et le broker. metrics expose les ventes, l'outbox, la
-DLQ et les files RabbitMQ.
+`/health/live` indique que le processus répond ; `/health/ready` vérifie la
+base et le broker ; `/metrics` expose les ventes, l'outbox, les tentatives
+d'envoi, le nombre d'attentes par magasin, la DLQ et les files RabbitMQ.
+Chaque réponse possède un `X-Request-ID` et les requêtes sont journalisées
+avec leur durée. Prometheus alerte sur la DLQ, l'accumulation d'outbox, les
+retry storms et l'indisponibilité du web.
 
 ## Sauvegardes
 
@@ -219,7 +230,8 @@ Le mode automatique de détection RabbitMQ possède aussi des tests dédiés.
 | COCO_SECRET | aléatoire | Clé Flask |
 | COCO_BOOTSTRAP_ADMIN_PASSWORD | admin123 en développement | Mot de passe admin créé lors du premier démarrage |
 | COCO_SEED_DEMO_USERS | 1 en développement, 0 en production | Crée les comptes de démonstration supplémentaires |
-| COCO_ENV | development | production impose COCO_SECRET |
+| COCO_ENV | development | production impose secret, RabbitMQ, PostgreSQL et bootstrap admin |
+| DATABASE_URL | vide | PostgreSQL du siège ; SQLite si vide |
 | COCO_DATA | ./data | Dossier des bases |
 | COCO_COMPONENT | all | all, web ou consumer |
 | COCO_WORKERS | 1 | Workers intégrés si 1 |
@@ -241,6 +253,19 @@ Le mode automatique de détection RabbitMQ possède aussi des tests dédiés.
 Pour une DLQ, ouvrir Messages en échec, analyser la cause, corriger le
 catalogue ou le siège, puis utiliser Rejouer.
 
+## Sécurité de production
+
+- définir `COCO_ENV=production`, `COCO_SECRET`, `DATABASE_URL` et une
+  `RABBIT_URL` qui n'utilise pas `guest/guest` ;
+- définir un `COCO_BOOTSTRAP_ADMIN_PASSWORD` d'au moins 12 caractères ;
+- conserver `COCO_SEED_DEMO_USERS=0` ; seul l'administrateur bootstrap est
+  créé automatiquement ;
+- activer HTTPS et `COCO_HTTPS=1` derrière le reverse proxy ;
+- remplacer les secrets d'exemple et limiter l'accès aux ports RabbitMQ,
+  PostgreSQL et Prometheus ;
+- sauvegarder régulièrement et tester la restauration, pas uniquement la
+  création du fichier de backup.
+
 ## Garanties actuelles
 
 - écriture locale avant publication ;
@@ -250,15 +275,21 @@ catalogue ou le siège, puis utiliser Rejouer.
 - idempotence ;
 - retries et DLQ ;
 - reprise de l'outbox après coupure ;
-- sauvegardes SQLite vérifiables.
+- sauvegardes SQLite ou PostgreSQL vérifiables ;
+- validation des magasins, caisses, prix, quantités et tailles de messages ;
+- comptes de démonstration désactivés par défaut en production.
 
-## Limites restantes
+## Limites restantes et choix d'exploitation
 
-- base centrale encore en SQLite ;
-- volume SQLite partagé dans la composition Docker ;
+- PostgreSQL est recommandé en production, mais reste optionnel pour le mode
+  local ;
+- la composition de démonstration monte un volume SQLite partagé : pour un
+  déploiement multi-caisses strictement isolé, utiliser un volume ou un
+  service producteur par caisse ;
 - pas encore de cluster RabbitMQ ;
-- métriques minimales sans Prometheus préconfiguré ;
-- tests de chaos et restauration complète à renforcer ;
+- la DLQ nécessite encore une analyse ou un rejeu humain ;
+- les tests de chaos et une restauration complète sur infrastructure réelle
+  doivent être planifiés ;
 - coupure réseau encore simulée par l'interface.
 
 ## Structure
@@ -274,5 +305,6 @@ catalogue ou le siège, puis utiliser Rejouer.
     templates/             interfaces HTML
     static/                CSS, JavaScript, graphiques
     tests/                 tests fonctionnels
+    .github/workflows/ci.yml CI Python, PostgreSQL et Compose
     Dockerfile             image des services
     docker-compose.services.yml  déploiement séparé
