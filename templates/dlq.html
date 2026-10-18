@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Messages en échec{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div><h1>Messages en échec (Dead Letter Queue)</h1>
+    <p>Ventes que le siège n'a pas pu traiter : message invalide, ou échec persistant après plusieurs reprises.</p></div>
+</div>
+
+{% if err %}<div class="banner bad">⛔ Broker injoignable : {{ err }}</div>{% endif %}
+
+<div class="card">
+  {% if items %}
+  <div class="scroll"><table>
+    <thead><tr><th>Ticket</th><th>Magasin</th><th class="r">Total</th><th>Cause de l'échec</th><th>Contenu</th>{% if me.role == 'admin' %}<th>Actions</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for m in items %}
+      <tr>
+        <td class="num"><b>{{ m.body.get('id_vente', '—') }}</b></td>
+        <td>{{ m.body.get('magasin', '—') }}</td>
+        <td class="r num">{{ '{:,}'.format(m.body['total']).replace(',', ' ') ~ ' F' if m.body.get('total') is number else '—' }}</td>
+        <td><span class="badge b-bad">{{ m.reason or 'inconnue' }}</span></td>
+        <td><details><summary class="muted" style="cursor:pointer">Voir le message</summary>
+          <pre class="json">{{ m.body | tojson(indent=2) }}</pre></details></td>
+        {% if me.role == 'admin' %}
+        <td><div class="row" style="flex-wrap:nowrap">
+          <form method="post" action="{{ url_for('dlq_action', action='requeue') }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ m.key }}">
+            <button class="btn sm" title="Après correction de la cause, renvoie le message dans la file principale">Rejouer</button></form>
+          <form method="post" action="{{ url_for('dlq_action', action='discard') }}" onsubmit="return confirm('Supprimer définitivement ce message ?')">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ m.key }}">
+            <button class="btn danger sm">Supprimer</button></form></div></td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty"><h2 style="margin-bottom:4px">Aucun message en échec 🎉</h2>Toutes les ventes reçues ont été traitées.</div>
+  {% endif %}
+</div>
+<p class="muted" style="font-size:.85rem;margin-top:12px">« Rejouer » remet le message dans la file principale : utile après correction de la cause (par exemple un produit ajouté au catalogue, ou la base du siège rétablie). Les doublons sont de toute façon neutralisés par l'identifiant unique de la vente.</p>
+{% endblock %}

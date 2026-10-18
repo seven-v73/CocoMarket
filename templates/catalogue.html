@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Catalogue & stock{% endblock %}
+{% block content %}
+<div class="pagehead"><div><div class="eyebrow">ADMINISTRATION</div><h1>Catalogue & stock</h1><p>Gérez les produits disponibles aux caisses et les niveaux de stock par magasin.</p></div></div>
+<div class="grid g-main">
+  <section class="card"><h2><span class="section-icon green">＋</span> Ajouter un produit</h2>
+    <form method="post" action="{{ url_for('product_create') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="grid g2"><div class="field"><label>Code produit</label><input name="sku" placeholder="ex. CAFE-250" required></div><div class="field"><label>Catégorie</label><input name="category" placeholder="Épicerie" required></div></div>
+      <div class="field"><label>Nom du produit</label><input name="name" placeholder="Café moulu 250 g" required></div>
+      <div class="grid g2"><div class="field"><label>Prix (F CFA)</label><input name="price" type="number" min="1" required></div><div class="field"><label>Seuil d'alerte</label><input name="threshold" type="number" min="0" value="40" required></div></div>
+      <button type="submit">Ajouter au catalogue</button>
+    </form><p class="muted form-note">Le produit sera créé avec un stock nul dans chaque magasin.</p>
+  </section>
+  <section class="card"><h2><span class="section-icon amber">▣</span> Ajuster un stock</h2>
+    <form method="post" action="{{ url_for('stock_adjust') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="field"><label>Magasin</label><select name="store" required>{% for s in stores %}<option value="{{ s.code }}">{{ s.code }} · {{ s.name.replace('CocoMarket ', '') }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Produit</label><select name="sku" required>{% for p in products %}<option value="{{ p.sku }}">{{ p.sku }} · {{ p.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Nouvelle quantité</label><input name="quantity" type="number" min="0" required></div>
+      <button type="submit" class="btn amber">Enregistrer le stock</button>
+    </form><p class="muted form-note">Fixe le stock réel après inventaire ou réception.</p>
+  </section>
+</div>
+<section class="card catalogue-list"><div class="section-heading"><div><h2><span class="section-icon blue">◈</span> Produits du catalogue</h2><p class="muted">Modifiez le prix et le seuil sans interrompre les caisses.</p></div><span class="badge b-info">{{ products|length }} produit{{ 's' if products|length != 1 }}</span></div>
+  <div class="scroll"><table><thead><tr><th>Produit</th><th>Catégorie</th><th class="r">Prix</th><th class="r">Stock réseau</th><th class="r">Seuil</th><th>Modifier</th></tr></thead><tbody>
+  {% for p in products %}<tr><form method="post" action="{{ url_for('product_update', sku=p.sku) }}"><input type="hidden" name="csrf" value="{{ csrf }}"><td><b class="num">{{ p.sku }}</b><input name="name" value="{{ p.name }}" required></td><td><input name="category" value="{{ p.category }}" required></td><td class="r"><input class="compact-number" name="price" type="number" min="1" value="{{ p.price }}" required></td><td class="r num"><span class="badge {{ 'b-bad' if p.total_stock <= p.threshold else 'b-ok' }}">{{ p.total_stock }}</span></td><td class="r"><input class="compact-number" name="threshold" type="number" min="0" value="{{ p.threshold }}" required></td><td><button class="btn ghost sm" type="submit">Enregistrer</button></td></form></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="card catalogue-list"><div class="section-heading"><div><h2><span class="section-icon amber">▤</span> Vue des stocks par magasin</h2><p class="muted">Les stocks bas sont signalés automatiquement.</p></div></div>
+  <div class="scroll"><table><thead><tr><th>Magasin</th><th>Produit</th><th class="r">Disponible</th><th>État</th></tr></thead><tbody>{% for s in stock %}<tr><td><b>{{ s.store }}</b><div class="muted">{{ s.store_name.replace('CocoMarket ', '') }}</div></td><td>{{ s.product_name }} <span class="muted num">{{ s.sku }}</span></td><td class="r num">{{ s.qty }}</td><td>{% if s.qty == 0 %}<span class="badge b-bad">Rupture</span>{% else %}<span class="badge b-ok">Disponible</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

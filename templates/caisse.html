@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Caisse{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <div class="eyebrow">POINT DE VENTE · {{ store.code }}</div>
+    <h1>Caisse {{ me.caisse }} · {{ store.name }}</h1>
+    <p>Caissier(ère) : {{ me.full_name }}</p>
+  </div>
+  <div class="status-bar">
+    <span id="linkPill" class="pill up"><span class="dot"></span><span id="linkTxt">Connecté au siège</span></span>
+    <span id="pendBadge" class="badge b-mute">0 vente en attente</span>
+  </div>
+</div>
+
+<div id="offlineBanner" class="banner warn" hidden>
+  ⚠ Liaison Internet coupée. Continuez à encaisser : chaque vente est enregistrée sur cette caisse et sera envoyée automatiquement au retour de la connexion.
+</div>
+
+<div class="pos">
+  <section>
+    <div class="card product-card">
+      <label class="sr-only" for="search">Rechercher un produit</label><input id="search" placeholder="Rechercher un produit (nom ou code)…" autocomplete="off">
+      <div class="chips" id="chips"></div>
+      <div class="products" id="products"><div class="skeleton line-load"></div><div class="skeleton line-load"></div><div class="skeleton line-load"></div></div>
+    </div>
+
+    <div class="card recent-card mt-16">
+      <div class="row section-heading"><h2>Derniers tickets de cette caisse</h2>
+        <span class="muted text-small">« Envoyé » = confirmé par le broker</span></div>
+      <div class="scroll"><table>
+        <thead><tr><th>Ticket</th><th>Heure</th><th class="r">Total</th><th>État</th><th></th></tr></thead>
+        <tbody id="tickets"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+      </table></div>
+
+      <details class="tools">
+        <summary>Outils de démonstration (tests de robustesse)</summary>
+        <div class="row mt-12">
+          <button class="btn ghost sm" id="btnLink"></button>
+          <button class="btn ghost sm" id="btnInvalid">Envoyer une vente invalide (→ DLQ)</button>
+        </div>
+        <p class="muted text-xs mt-12">
+          « Simuler une coupure » bloque l'envoi de toute la boutique : les ventes s'accumulent en attente puis partent d'elles-mêmes au rétablissement.
+          Le bouton « Renvoyer » (dans la liste) republie un ticket déjà envoyé pour prouver que le siège rejette les doublons.</p>
+      </details>
+    </div>
+  </section>
+
+  <aside class="card ticket">
+    <h2><span class="section-icon green">▤</span> Ticket en cours</h2>
+    <div class="lines" id="lines"><div class="empty"><span class="empty-icon">＋</span><b>Ticket vide</b><small>Sélectionnez un produit pour commencer.</small></div></div>
+    <div class="total"><span>Total</span><span class="num" id="total">0 F</span></div>
+    <button class="btn lg" id="pay" disabled><svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM7 9h10M7 13h4"/></svg>Encaisser</button>
+    <button class="btn ghost w-full mt-8" id="clear"><svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>Annuler le ticket</button>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let PRODUCTS = [], CART = {}, CAT = "Tous", LINK = true;
+const $ = id => document.getElementById(id);
+
+function renderProducts() {
+  const q = $("search").value.trim().toLowerCase();
+  const cats = ["Tous", ...new Set(PRODUCTS.map(p => p.category))];
+  $("chips").innerHTML = cats.map(c => `<button class="chip ${c === CAT ? "on" : ""}" data-c="${esc(c)}">${esc(c)}</button>`).join("");
+  const list = PRODUCTS.filter(p => (CAT === "Tous" || p.category === CAT) && (!q || (p.name + " " + p.sku).toLowerCase().includes(q)));
+  $("products").innerHTML = list.length ? list.map(p =>
+    `<button class="prod cat-${categoryClass(p.category)}" data-sku="${esc(p.sku)}"><span class="prod-icon">${categoryIcon(p.category)}</span><b>${esc(p.name)}</b><span class="num">${cfa(p.price)}</span></button>`).join("")
+    : `<div class="empty" style="grid-column:1/-1">Aucun produit trouvé.</div>`;
+}
+
+function categoryClass(category) {
+  return String(category || "autre").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]+/g, "-");
+}
+
+function categoryIcon(category) {
+  const c = String(category || "").toLowerCase();
+  const paths = c.includes("boisson") ? '<path d="M8 3h8l-1 18H9L8 3Z"/><path d="M8 7h8"/>'
+    : c.includes("frais") ? '<path d="M12 21V8M12 12c-4-1-6-3-6-6 4 0 6 2 6 6ZM12 11c4-1 6-3 6-6-4 0-6 2-6 6Z"/>'
+    : c.includes("viande") ? '<path d="M7 17c-3-3-2-7 1-9 3-2 6-1 8 1 2 2 3 5 1 8-2 3-7 3-10 0Z"/><circle cx="14" cy="13" r="1"/>'
+    : c.includes("boulanger") ? '<path d="M4 14c0-5 3-8 8-8s8 3 8 8v4H4v-4Z"/><path d="M8 11h.01M12 9h.01M16 11h.01"/>'
+    : c.includes("hygiene") ? '<path d="M8 8h8v12H8zM10 8V5h4v3M6 20h12"/>'
+    : c.includes("fruit") || c.includes("legume") ? '<path d="M12 20c-5 0-7-4-7-8 0-3 2-5 5-5 1 0 2 .5 2 1s1-1 2-1c3 0 5 2 5 5 0 4-2 8-7 8Z"/><path d="M12 8c0-3 2-5 5-5"/>'
+    : '<path d="M5 7h14v13H5z"/><path d="M8 7V4h8v3M8 11h8M8 15h5"/>';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+
+function renderCart() {
+  const skus = Object.keys(CART);
+  let total = 0;
+  $("lines").innerHTML = skus.length ? skus.map(s => {
+    const p = PRODUCTS.find(x => x.sku === s), q = CART[s]; total += p.price * q;
+    return `<div class="line"><div><b>${esc(p.name)}</b><div class="muted num" style="font-size:.8rem">${cfa(p.price)} × ${q}</div></div>
+      <div class="qty"><button data-d="-1" data-sku="${esc(s)}">−</button><b class="num">${q}</b><button data-d="1" data-sku="${esc(s)}">+</button></div>
+      <b class="num">${cfa(p.price * q)}</b></div>`;
+  }).join("") : `<div class="empty"><span class="empty-icon">＋</span><b>Ticket vide</b><small>Sélectionnez un produit pour commencer.</small></div>`;
+  $("total").textContent = cfa(total);
+  $("pay").disabled = !skus.length;
+}
+
+function renderState(s) {
+  LINK = s.link;
+  const demoToggle = document.getElementById("demoToggle");
+  const demoLabel = document.getElementById("demoLabel");
+  const demoBox = document.querySelector("[data-demo-role]");
+  if (demoToggle) demoToggle.checked = !s.link;
+  if (demoLabel) demoLabel.textContent = s.link ? "Simulation inactive" : "Liaison coupée";
+  if (demoBox) demoBox.classList.toggle("is-active", !s.link);
+  $("linkPill").className = "pill " + (s.link ? "up" : "down");
+  $("linkTxt").textContent = s.link ? "Connecté au siège" : "Hors ligne (simulation)";
+  $("offlineBanner").hidden = s.link;
+  $("btnLink").textContent = s.link ? "Simuler une coupure Internet" : "Rétablir la liaison Internet";
+  $("pendBadge").className = "badge " + (s.pending ? "b-warn" : "b-ok");
+  $("pendBadge").textContent = s.pending ? `${s.pending} vente${s.pending > 1 ? "s" : ""} en attente d'envoi` : "Toutes les ventes sont envoyées";
+  $("tickets").innerHTML = s.tickets.length ? s.tickets.map(t => {
+    const st = t.status === "sent" ? `<span class="badge b-ok"><span class="dot"></span>Envoyé</span>`
+      : `<span class="badge b-warn" title="${esc(t.last_error || "")}"><span class="dot"></span>En attente${t.attempts ? " · " + t.attempts + " essai" + (t.attempts > 1 ? "s" : "") : ""}</span>`;
+    const act = t.status === "sent" ? `<button class="btn ghost sm" data-dup="${esc(t.id_vente)}" title="Test : republier ce ticket">Renvoyer</button>` : "";
+    return `<tr><td class="num">${esc(t.id_vente)}</td><td>${hhmm(t.ts)}</td><td class="r num">${cfa(t.total)}</td><td>${st}</td><td class="r">${act}</td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="empty">Aucun ticket pour l'instant.</td></tr>`;
+}
+
+async function refresh() { try { renderState(await api("/api/caisse/state")); } catch (e) {} }
+
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.c) { CAT = t.dataset.c; renderProducts(); }
+  else if (t.classList.contains("prod")) { CART[t.dataset.sku] = (CART[t.dataset.sku] || 0) + 1; renderCart(); }
+  else if (t.dataset.d) {
+    const s = t.dataset.sku; CART[s] = (CART[s] || 0) + Number(t.dataset.d);
+    if (CART[s] <= 0) delete CART[s]; renderCart();
+  }
+  else if (t.dataset.dup) {
+    try { await api("/api/caisse/test/duplicate", "POST", { id_vente: t.dataset.dup }); toast("Ticket republié : le siège doit l'ignorer (voir le tableau de bord).", "warn"); }
+    catch (err) { toast(err.message, "err"); }
+  }
+});
+
+$("search").addEventListener("input", renderProducts);
+$("clear").onclick = () => { CART = {}; renderCart(); };
+
+$("pay").onclick = async () => {
+  const lines = Object.entries(CART).map(([sku, qty]) => ({ sku, qty }));
+  $("pay").disabled = true;
+  try {
+    const r = await api("/api/caisse/sale", "POST", { lines });
+    CART = {}; renderCart(); renderState(r);
+    toast(r.sent ? `Ticket ${r.id_vente} enregistré et envoyé au siège.` : `Ticket ${r.id_vente} enregistré. Envoi différé : liaison indisponible.`, r.sent ? "ok" : "warn");
+  } catch (err) { toast(err.message, "err"); renderCart(); }
+};
+
+$("btnLink").onclick = async () => {
+  try {
+    const s = await api("/api/caisse/link", "POST", { up: !LINK }); renderState(s);
+    toast(s.link ? "Liaison rétablie : envoi des ventes en attente…" : "Liaison coupée (simulation).", s.link ? "ok" : "warn");
+    if (s.link) setTimeout(refresh, 1500);
+  } catch (err) { toast(err.message, "err"); }
+};
+
+$("btnInvalid").onclick = async () => {
+  try { await api("/api/caisse/test/invalid", "POST", {}); toast("Vente invalide envoyée : elle doit finir dans « Messages en échec ».", "warn"); }
+  catch (err) { toast(err.message, "err"); }
+};
+
+(async () => {
+  PRODUCTS = await api("/api/caisse/products");
+  renderProducts(); renderCart(); refresh();
+  setInterval(refresh, 3000);
+})();
+</script>
+{% endblock %}

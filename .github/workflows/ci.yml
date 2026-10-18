@@ -1,0 +1,56 @@
+name: CocoMarket CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: cocomarket_test
+          POSTGRES_USER: cocomarket
+          POSTGRES_PASSWORD: test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cocomarket -d cocomarket_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      COCO_BROKER: local
+      COCO_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+      - name: Vérifier la syntaxe
+        run: python -m py_compile app.py backup.py caisse.py caisse_service.py caisse_simulator.py consumer.py consumer_service.py broker/*.py
+      - name: Vérifier la composition Docker
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          RABBITMQ_USER: cocomarket
+          RABBITMQ_PASSWORD: ci-rabbit-password
+          COCO_SECRET: ci-production-secret
+          COCO_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-password
+        run: docker compose -f docker-compose.services.yml config --quiet
+      - name: Vérifier les règles de sécurité production
+        env:
+          COCO_ENV: production
+          COCO_SECRET: ci-production-secret
+          COCO_BOOTSTRAP_ADMIN_PASSWORD: ci-bootstrap-admin-password
+          COCO_SEED_DEMO_USERS: "0"
+          DATABASE_URL: postgresql://cocomarket:ci-password@localhost:5432/cocomarket_test
+          RABBIT_URL: amqp://cocomarket:ci-password@localhost:5672/%2F
+        run: python -c "import config; assert not config.SEED_DEMO_USERS and config.MIN_PASSWORD_LENGTH == 12"
+      - name: Exécuter les tests
+        run: python -m pytest tests -q
+      - name: Tester le backend PostgreSQL
+        env:
+          DATABASE_URL: postgresql://cocomarket:test-password@localhost:5432/cocomarket_test
+        run: python -m pytest tests/test_postgres_backend.py -q

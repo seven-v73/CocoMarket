@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Utilisateurs{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div><h1>Gestion des utilisateurs</h1>
+    <p>Créez les comptes des caissiers (rattachés à un magasin et une caisse), du siège et des administrateurs.</p></div>
+</div>
+
+<div class="grid g-main">
+  <div class="card">
+    <h2>Comptes ({{ users|length }})</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Identifiant</th><th>Nom</th><th>Rôle</th><th>Affectation</th><th>État</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td><b>{{ u.username }}</b></td>
+          <td>{{ u.full_name }}</td>
+          <td><span class="badge {{ 'b-info' if u.role == 'admin' else ('b-warn' if u.role == 'siege' else 'b-mute') }}">{{ role_labels[u.role] }}</span></td>
+          <td>{% if u.store %}{{ u.store }} · caisse {{ u.caisse }}{% else %}<span class="muted">Siège</span>{% endif %}</td>
+          <td>{% if u.active %}<span class="badge b-ok"><span class="dot"></span>Actif</span>{% else %}<span class="badge b-bad"><span class="dot"></span>Désactivé</span>{% endif %}</td>
+          <td><div class="row" style="flex-wrap:nowrap">
+            <form method="post" action="{{ url_for('user_action', uid=u.id, action='reset') }}" onsubmit="return confirm('Générer un nouveau mot de passe temporaire pour {{ u.username }} ?')">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn ghost sm">Réinitialiser</button></form>
+            {% if u.id != me.id %}
+            <form method="post" action="{{ url_for('user_action', uid=u.id, action='toggle') }}">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm {{ 'danger' if u.active else '' }}">{{ 'Désactiver' if u.active else 'Réactiver' }}</button></form>
+            {% endif %}</div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Nouveau compte</h2>
+    <form method="post" action="{{ url_for('user_create') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="field"><label>Nom complet</label><input name="full_name" required></div>
+      <div class="field"><label>Identifiant</label><input name="username" placeholder="ex. mariam.k" required></div>
+      <div class="field"><label>Rôle</label>
+        <select name="role" id="role">
+          <option value="caissier">Caissier(ère)</option><option value="siege">Siège (consultation)</option><option value="admin">Administrateur</option></select></div>
+      <div id="caissierFields">
+        <div class="field"><label>Magasin</label>
+          <select name="store">{% for s in stores %}<option value="{{ s.code }}">{{ s.code }} · {{ s.name.replace('CocoMarket ', '') }} ({{ s.caisses }} caisses)</option>{% endfor %}</select></div>
+        <div class="field"><label>Numéro de caisse</label><input name="caisse" type="number" min="1" max="8" value="1"></div>
+      </div>
+      <div class="field"><label>Mot de passe initial ({{ password_min }} caractères min.)</label><input name="password" type="password" minlength="{{ password_min }}" autocomplete="new-password" required></div>
+      <button style="width:100%">Créer le compte</button>
+    </form>
+    <p class="muted" style="font-size:.82rem;margin:12px 0 0"><b>Siège</b> : tableau de bord et consultation des messages en échec. <b>Administrateur</b> : tout cela, plus gestion des comptes, rejeu des messages et outils de simulation.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const role = document.getElementById("role"), box = document.getElementById("caissierFields");
+const sync = () => { const on = role.value === "caissier"; box.style.display = on ? "" : "none"; box.querySelectorAll("select,input").forEach(i => i.disabled = !on); };
+role.onchange = sync; sync();
+</script>
+{% endblock %}

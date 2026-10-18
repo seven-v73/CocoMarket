@@ -1,0 +1,38 @@
+groups:
+  - name: cocomarket
+    rules:
+      - alert: CocoMarketDeadLetterQueue
+        expr: cocomarket_dlq_total > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Messages en échec dans CocoMarket
+          description: La DLQ contient des messages qui nécessitent une analyse.
+
+      - alert: CocoMarketOutboxAccumulation
+        expr: cocomarket_outbox_pending > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Ventes en attente dans une outbox
+          description: Des ventes ne sont pas encore confirmées par le broker.
+
+      - alert: CocoMarketOutboxRetryStorm
+        expr: increase(cocomarket_outbox_attempts[10m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Tentatives répétées d'envoi des caisses
+          description: Une ou plusieurs caisses rencontrent probablement une liaison instable ou un broker indisponible.
+
+      - alert: CocoMarketBrokerUnavailable
+        expr: up{job="cocomarket-web"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Application CocoMarket indisponible
+          description: Prometheus ne peut plus collecter les métriques du web.

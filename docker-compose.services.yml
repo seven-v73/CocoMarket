@@ -1,0 +1,173 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cocomarket
+      POSTGRES_USER: cocomarket
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD avant le démarrage}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocomarket -d cocomarket"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      web:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:?Définir RABBITMQ_USER avant le démarrage}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?Définir RABBITMQ_PASSWORD avant le démarrage}"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    command: gunicorn --bind 0.0.0.0:5000 --workers 2 --access-logfile - app:app
+    environment:
+      COCO_BROKER: rabbit
+      RABBIT_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+      COCO_COMPONENT: web
+      COCO_ENV: production
+      COCO_WORKERS: "0"
+      COCO_DATA: /app/data
+      DATABASE_URL: postgresql://cocomarket:${POSTGRES_PASSWORD}@postgres:5432/cocomarket
+      COCO_SECRET: "${COCO_SECRET:?Définir COCO_SECRET avant le démarrage}"
+      COCO_BOOTSTRAP_ADMIN_PASSWORD: "${COCO_BOOTSTRAP_ADMIN_PASSWORD:?Définir COCO_BOOTSTRAP_ADMIN_PASSWORD avant le démarrage}"
+    ports:
+      - "5000:5000"
+    volumes:
+      - coco_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  consumer:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: python consumer_service.py
+    environment:
+      COCO_BROKER: rabbit
+      RABBIT_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+      COCO_COMPONENT: consumer
+      COCO_ENV: production
+      COCO_DATA: /app/data
+      DATABASE_URL: postgresql://cocomarket:${POSTGRES_PASSWORD}@postgres:5432/cocomarket
+      COCO_SECRET: "${COCO_SECRET:?Définir COCO_SECRET avant le démarrage}"
+      COCO_BOOTSTRAP_ADMIN_PASSWORD: "${COCO_BOOTSTRAP_ADMIN_PASSWORD:?Définir COCO_BOOTSTRAP_ADMIN_PASSWORD avant le démarrage}"
+    volumes:
+      - coco_data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  caisse-abj01:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 15s
+    command: python caisse_service.py
+    environment:
+      COCO_BROKER: rabbit
+      RABBIT_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+      COCO_STORE: ABJ01
+      COCO_LINK_MODE: auto
+      COCO_DATA: /app/data
+      COCO_ENV: production
+      COCO_SECRET: "${COCO_SECRET:?Définir COCO_SECRET avant le démarrage}"
+      COCO_BOOTSTRAP_ADMIN_PASSWORD: "${COCO_BOOTSTRAP_ADMIN_PASSWORD:?Définir COCO_BOOTSTRAP_ADMIN_PASSWORD avant le démarrage}"
+      DATABASE_URL: postgresql://cocomarket:${POSTGRES_PASSWORD}@postgres:5432/cocomarket
+    volumes:
+      - coco_data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  caisse-bke01:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 15s
+    command: python caisse_service.py
+    environment:
+      COCO_BROKER: rabbit
+      RABBIT_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+      COCO_STORE: BKE01
+      COCO_LINK_MODE: auto
+      COCO_DATA: /app/data
+      COCO_ENV: production
+      COCO_SECRET: "${COCO_SECRET:?Définir COCO_SECRET avant le démarrage}"
+      COCO_BOOTSTRAP_ADMIN_PASSWORD: "${COCO_BOOTSTRAP_ADMIN_PASSWORD:?Définir COCO_BOOTSTRAP_ADMIN_PASSWORD avant le démarrage}"
+      DATABASE_URL: postgresql://cocomarket:${POSTGRES_PASSWORD}@postgres:5432/cocomarket
+    volumes:
+      - coco_data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  caisse-kor01:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 15s
+    command: python caisse_service.py
+    environment:
+      COCO_BROKER: rabbit
+      RABBIT_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+      COCO_STORE: KOR01
+      COCO_LINK_MODE: auto
+      COCO_DATA: /app/data
+      COCO_ENV: production
+      COCO_SECRET: "${COCO_SECRET:?Définir COCO_SECRET avant le démarrage}"
+      COCO_BOOTSTRAP_ADMIN_PASSWORD: "${COCO_BOOTSTRAP_ADMIN_PASSWORD:?Définir COCO_BOOTSTRAP_ADMIN_PASSWORD avant le démarrage}"
+      DATABASE_URL: postgresql://cocomarket:${POSTGRES_PASSWORD}@postgres:5432/cocomarket
+    volumes:
+      - coco_data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  rabbit_data:
+  coco_data:
+  postgres_data:
+  prometheus_data:

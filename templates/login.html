@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion · CocoMarket</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script>document.documentElement.dataset.theme=localStorage.getItem('cocomarket-theme')==='dark'?'dark':'light';</script>
+</head>
+<body>
+<div class="login-wrap">
+  <section class="login-art">
+    <div class="brand login-brand"><div class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.5 7.5A7 7 0 1 0 18.5 16"/></svg></div><span>CocoMarket</span></div>
+    <h1>Aucune vente perdue,<br>même quand la connexion tombe.</h1>
+    <ul>
+      <li>Chaque vente est enregistrée sur la caisse avant tout envoi</li>
+      <li>Renvoi automatique dès que la liaison revient</li>
+      <li>Doublons ignorés, messages en échec isolés</li>
+      <li>Rapprochement caisses / siège en temps réel</li>
+    </ul>
+  </section>
+  <section class="login-form">
+    <div class="card">
+      <h1 style="margin-bottom:4px">Connexion</h1>
+      <p class="muted" style="margin:0 0 18px">Accédez à votre espace caisse ou siège.</p>
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+      {% endwith %}
+      <form method="post">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="field"><label for="u">Identifiant</label><input id="u" name="username" autocomplete="username" autofocus required></div>
+        <div class="field"><label for="p">Mot de passe</label><input id="p" type="password" name="password" autocomplete="current-password" required></div>
+        <button class="btn lg" style="margin-top:6px">Se connecter</button>
+      </form>
+      <div class="hint">Comptes de démonstration :<br>
+        <code>admin</code> / <code>admin123</code> · <code>siege</code> / <code>siege123</code><br>
+        <code>awa</code> / <code>caisse123</code> (caisse Abidjan)
+        <br><code>fatou</code> / <code>caisse123</code> (caisse Korhogo)</div>
+    </div>
+  </section>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

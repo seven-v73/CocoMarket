@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Journal d'audit{% endblock %}
+{% block content %}
+<div class="pagehead"><div><div class="eyebrow">ADMINISTRATION</div><h1>Journal d'audit</h1><p>Historique des actions et événements techniques du système.</p></div><a class="btn ghost" href="{{ url_for('audit_export') }}">Exporter en CSV</a></div>
+<section class="card audit-card">
+  {% if events %}<div class="audit-toolbar"><label class="sr-only" for="auditSearch">Rechercher dans le journal</label><input id="auditSearch" placeholder="Rechercher un événement…"><select id="auditFilter"><option value="">Tous les types</option>{% for kind in events|map(attribute='kind')|unique|sort %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}</select><span class="badge b-mute" id="auditCount">{{ events|length }} événements</span></div><div class="audit-list">{% for e in events %}<article class="audit-item" data-kind="{{ e.kind }}" data-text="{{ (e.kind ~ ' ' ~ e.detail)|lower }}"><span class="audit-time">{{ e.ts[11:19] }}</span><span class="audit-kind {{ e.kind }}">{{ e.kind }}</span><p>{{ e.detail }}</p></article>{% endfor %}</div>
+  {% else %}<div class="empty"><span class="empty-icon">◷</span><b>Aucun événement</b><small>Le journal se remplira lors des opérations système.</small></div>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script>
+const auditSearch=document.getElementById("auditSearch"), auditFilter=document.getElementById("auditFilter"), auditCount=document.getElementById("auditCount");
+function filterAudit(){const q=(auditSearch.value||"").toLowerCase(), kind=auditFilter.value;let n=0;document.querySelectorAll(".audit-item").forEach(row=>{const show=(!q||row.dataset.text.includes(q))&&(!kind||row.dataset.kind===kind);row.hidden=!show;if(show)n++;});auditCount.textContent=n+" événement"+(n>1?"s":"");}
+auditSearch?.addEventListener("input",filterAudit);auditFilter?.addEventListener("change",filterAudit);
+</script>{% endblock %}

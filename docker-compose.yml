@@ -1,0 +1,17 @@
+# RabbitMQ avec interface de gestion : http://localhost:15672  (guest / guest)
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: cocomarket-rabbit
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # console web
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq   # les files durables survivent au redémarrage du conteneur
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+volumes:
+  rabbit_data:

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Tableau de bord{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <div><div class="eyebrow">PILOTAGE DU RÉSEAU</div><h1>Tableau de bord des ventes</h1><p>Données reçues par le siège via <b id="brokerName">{{ broker_name }}</b> · actualisation automatique</p></div>
+  <div class="row filters">
+    <select id="fStore"><option value="">Tous les magasins</option>
+      {% for s in stores %}<option value="{{ s.code }}">{{ s.code }} · {{ s.name.replace('CocoMarket ', '') }}</option>{% endfor %}</select>
+    <select id="fPeriod"><option value="today">Aujourd'hui</option><option value="7d">7 derniers jours</option><option value="30d">30 derniers jours</option></select>
+  </div>
+</div>
+
+<div id="banners" aria-live="polite"></div>
+
+<div class="kpis" id="kpis"><div class="skeleton kpi-load"></div><div class="skeleton kpi-load"></div><div class="skeleton kpi-load"></div><div class="skeleton kpi-load"></div></div>
+
+<div class="grid g-main" style="margin-bottom:16px">
+  <div class="card chart-card"><h2 id="serieTitle"><span class="section-icon green">↗</span> Chiffre d'affaires</h2><div class="chart-box"><canvas id="cSerie"></canvas></div></div>
+  <div class="card chart-card"><h2><span class="section-icon blue">◉</span> Chiffre d'affaires par magasin</h2><div class="chart-box"><canvas id="cStore"></canvas></div></div>
+</div>
+
+<div class="grid g-main" style="margin-bottom:16px">
+  <div class="card">
+    <h2><span class="section-icon amber">⌁</span> Rapprochement caisses ↔ siège</h2>
+    <p class="muted" style="margin:-4px 0 10px;font-size:.85rem">Ce que les caisses ont enregistré face à ce que le siège a reçu. Un écart n'est jamais une vente perdue : c'est une vente encore en route.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Magasin</th><th>Liaison</th><th class="r">Tickets caisses</th><th class="r">Reçus siège</th><th class="r">CA caisses</th><th class="r">CA siège</th><th class="r">Écart</th><th>État</th></tr></thead>
+      <tbody id="recon"></tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2><span class="section-icon purple">≋</span> File de messages</h2>
+    <div class="queue-grid" id="queue"></div>
+    <p class="muted" style="font-size:.82rem;margin:8px 0 0">En attente = reçus par le broker, pas encore traités. Messages en échec : voir « Messages en échec » à gauche.</p>
+    <h2 style="margin-top:18px"><span class="section-icon slate">◷</span> Journal</h2>
+    <ul class="events" id="events"></ul>
+  </div>
+</div>
+
+<div class="grid g2" style="margin-bottom:16px">
+  <div class="card"><h2><span class="section-icon green">★</span> Produits les plus vendus</h2><div class="scroll"><table>
+    <thead><tr><th>Produit</th><th class="r">Qté</th><th class="r">CA</th></tr></thead><tbody id="top"></tbody></table></div></div>
+  <div class="card"><h2><span class="section-icon red">!</span> Alertes de stock</h2><div class="scroll"><table>
+    <thead><tr><th>Magasin</th><th>Produit</th><th class="r">Stock</th><th>Seuil</th></tr></thead><tbody id="alerts"></tbody></table></div></div>
+</div>
+
+{% if me.role == 'admin' %}
+<div class="card">
+  <h2>Outils de démonstration</h2>
+  <div class="row">
+    <button class="btn ghost" id="btnSim"><svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M6 17V9M12 17V5M18 17v-3"/></svg>Générer 30 ventes de démonstration</button>
+    <button class="btn amber" id="btnDown"></button>
+  </div>
+  <p class="muted" style="font-size:.84rem;margin:10px 0 0">Le contrôle « Mode simulation » dans la barre latérale permet d'activer ou de désactiver rapidement la panne du siège.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+<script>
+const $ = id => document.getElementById(id);
+let cSerie, cStore, HQDOWN = false;
+const GREEN = "#0e7a4f", AMBER = "#f2a413";
+
+function mkCharts() {
+  Chart.defaults.font.family = "system-ui, sans-serif";
+  Chart.defaults.color = "#667a70";
+  cSerie = new Chart($("cSerie"), { type: "bar",
+    data: { labels: [], datasets: [{ label: "CA (F CFA)", data: [], backgroundColor: GREEN, borderRadius: 5, yAxisID: "y" },
+      { label: "Tickets", data: [], type: "line", borderColor: AMBER, backgroundColor: AMBER, tension: .3, pointRadius: 3, yAxisID: "y2" }] },
+    options: { maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => nf.format(v) } }, y2: { position: "right", beginAtZero: true, grid: { display: false }, ticks: { precision: 0 } } },
+      plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label} : ${nf.format(c.parsed.y)}` } } } } });
+  cStore = new Chart($("cStore"), { type: "bar",
+    data: { labels: [], datasets: [{ label: "CA (F CFA)", data: [], backgroundColor: GREEN, borderRadius: 5 }] },
+    options: { indexAxis: "y", maintainAspectRatio: false, animation: false,
+      scales: { x: { beginAtZero: true, ticks: { callback: v => nf.format(v) } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => nf.format(c.parsed.x) + " F" } } } } });
+}
+
+function kpi(l, v, s, cls = "") { return `<div class="kpi ${cls}"><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s || "&nbsp;"}</div></div>`; }
+
+function render(d) {
+  const k = d.kpis;
+  $("brokerName").textContent = d.broker;
+  HQDOWN = d.hq_down;
+  const demoToggle = document.getElementById("demoToggle");
+  const demoLabel = document.getElementById("demoLabel");
+  const demoBox = document.querySelector("[data-demo-role]");
+  if (demoToggle) demoToggle.checked = d.hq_down;
+  if (demoLabel) demoLabel.textContent = d.hq_down ? "Siège indisponible" : "Simulation inactive";
+  if (demoBox) demoBox.classList.toggle("is-active", d.hq_down);
+  let b = "";
+  if (d.hq_down) b += `<div class="banner bad">⛔ Panne simulée de la base du siège : les ventes reçues sont retentées puis, si la panne dure, déposées dans les messages en échec.</div>`;
+  if (!d.queue.ok) b += `<div class="banner bad">⛔ Broker injoignable : ${esc(d.queue.error)}</div>`;
+  if (k.pending_total) b += `<div class="banner warn">⏳ ${k.pending_total} vente${k.pending_total > 1 ? "s" : ""} encore en attente dans les caisses (liaison coupée). Elles seront intégrées dès le retour de la connexion.</div>`;
+  $("banners").innerHTML = b;
+
+  $("kpis").innerHTML =
+    kpi("Chiffre d'affaires", cfa(k.ca), `${nf.format(k.items)} articles vendus`) +
+    kpi("Tickets reçus", nf.format(k.nb), "") +
+    kpi("Panier moyen", cfa(k.panier), "", "blue") +
+    kpi("Délai d'acheminement", duration(k.delay_avg), "max : " + duration(k.delay_max), "amber") +
+    kpi("Doublons ignorés", nf.format(k.duplicates), "protégés par l'identifiant unique", "blue") +
+    kpi("Messages en échec", nf.format(k.dlq), k.dlq ? "à examiner" : "aucun", k.dlq ? "red bad" : "");
+
+  $("serieTitle").textContent = d.mode === "hour" ? "Ventes par heure (heure d'achat en caisse)" : "Ventes par jour";
+  cSerie.data.labels = d.series.labels; cSerie.data.datasets[0].data = d.series.ca; cSerie.data.datasets[1].data = d.series.nb; cSerie.update();
+  cStore.data.labels = d.by_store.map(s => s.store); cStore.data.datasets[0].data = d.by_store.map(s => s.ca); cStore.update();
+
+  const st = { ok: ["b-ok", "Rapproché"], pending: ["b-warn", "En attente caisse"], transit: ["b-info", "En transit"] };
+  $("recon").innerHTML = d.recon.map(r => {
+    const [cls, txt] = st[r.status];
+    return `<tr><td><b>${esc(r.store)}</b><div class="muted" style="font-size:.78rem">${esc(r.name.replace("CocoMarket ", ""))}</div></td>
+      <td>${r.link ? `<span class="badge b-ok"><span class="dot"></span>En ligne</span>` : `<span class="badge b-bad"><span class="dot"></span>Coupée</span>`}</td>
+      <td class="r num">${r.emitted_nb}</td><td class="r num">${r.received_nb}</td>
+      <td class="r num">${cfa(r.emitted_total)}</td><td class="r num">${cfa(r.received_total)}</td>
+      <td class="r num"><b ${r.ecart ? 'style="color:var(--red)"' : ""}>${r.ecart ? cfa(r.ecart) : "0"}</b></td>
+      <td><span class="badge ${cls}">${txt}${r.pending ? " · " + r.pending : ""}</span></td></tr>`;
+  }).join("");
+
+  const q = d.queue;
+  $("queue").innerHTML =
+    `<div class="qbox"><div class="v num">${q.ready}</div><div class="l">En attente</div></div>
+     <div class="qbox"><div class="v num">${q.unacked}</div><div class="l">En traitement</div></div>
+     <div class="qbox ${q.dlq ? "bad" : ""}"><div class="v num">${q.dlq}</div><div class="l">En échec</div></div>`;
+
+  const ico = { doublon: "🔁", retry: "↻", dlq: "⚠️", panne: "⛔", liaison: "📡", admin: "👤", simulation: "🧪" };
+  $("events").innerHTML = d.events.length ? d.events.map(e =>
+    `<li><time>${hhmm(e.ts)}</time><span>${ico[e.kind] || "•"} ${esc(e.detail)}</span></li>`).join("") : `<li class="muted">Aucun évènement.</li>`;
+
+  $("top").innerHTML = d.top.length ? d.top.map(t => `<tr><td>${esc(t.name)}</td><td class="r num">${nf.format(t.qty)}</td><td class="r num">${cfa(t.ca)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty">Aucune vente sur la période.</td></tr>`;
+  $("alerts").innerHTML = d.alerts.length ? d.alerts.map(a =>
+    `<tr><td>${esc(a.store)}</td><td>${esc(a.name)}</td><td class="r num"><span class="badge ${a.qty <= 0 ? "b-bad" : "b-warn"}">${a.qty}</span></td><td class="num">${a.threshold}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">Aucun stock sous le seuil.</td></tr>`;
+
+  const bd = $("btnDown");
+  if (bd) bd.textContent = d.hq_down ? "Rétablir la base du siège" : "Simuler une panne du siège";
+}
+
+async function load() {
+  try { render(await api(`/api/siege/overview?store=${encodeURIComponent($("fStore").value)}&period=${$("fPeriod").value}`)); }
+  catch (e) { /* on garde l'affichage précédent */ }
+}
+
+$("fStore").onchange = $("fPeriod").onchange = load;
+const sim = $("btnSim"), down = $("btnDown");
+if (sim) sim.onclick = async () => { try { const r = await api("/api/siege/simulate", "POST", { n: 30 }); toast(`${r.n} ventes générées (${r.sent} envoyées, ${r.pending} en attente).`, "ok"); load(); } catch (e) { toast(e.message, "err"); } };
+if (down) down.onclick = async () => { try { await api("/api/siege/hq_down", "POST", { down: !HQDOWN }); load(); } catch (e) { toast(e.message, "err"); } };
+
+mkCharts(); load(); setInterval(load, 4000);
+</script>
+{% endblock %}

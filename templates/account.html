@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Mon compte{% endblock %}
+{% block content %}
+<div class="pagehead"><div><h1>Mon compte</h1><p>{{ me.full_name }} · {{ role_labels[me.role] }}</p></div></div>
+<div class="card" style="max-width:440px">
+  <h2>Changer mon mot de passe</h2>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field"><label>Mot de passe actuel</label><input type="password" name="old" autocomplete="current-password" required></div>
+    <div class="field"><label>Nouveau mot de passe (8 caractères minimum)</label><input type="password" name="new" autocomplete="new-password" minlength="8" required></div>
+    <div class="field"><label>Confirmer le nouveau mot de passe</label><input type="password" name="new2" autocomplete="new-password" minlength="8" required></div>
+    <button>Enregistrer</button>
+  </form>
+</div>
+{% endblock %}
