@@ -51,9 +51,21 @@ def test_pages_rendent(clients):
     assert clients["admin"].get("/siege/catalogue").status_code == 200
     assert clients["admin"].get("/siege/journal").status_code == 200
     assert clients["admin"].get("/siege/journal/export").status_code == 200
+    assert clients["siege"].get("/siege/rapprochement/export").status_code == 200
     assert clients["admin"].get("/compte").status_code == 200
     assert A.app.test_client().get("/login").status_code == 200
     assert A.app.test_client().get("/inexistant").status_code == 404
+
+
+def test_export_rapprochement_contient_les_colonnes_metier(clients):
+    response = clients["siege"].get("/siege/rapprochement/export")
+    text = response.get_data(as_text=True)
+    assert response.mimetype == "text/csv"
+    assert "tickets_caisse" in text
+    assert "tickets_recus" in text
+    assert "ca_en_attente" in text
+    assert "ecart" in text
+    assert "ABJ01" in text
 
 
 def test_health_metrics_et_en_tetes_de_securite():
@@ -75,6 +87,7 @@ def test_controle_des_roles(clients):
     assert clients["siege"].get("/siege/catalogue").status_code == 403
     assert clients["siege"].get("/siege/journal").status_code == 403
     assert clients["siege"].get("/siege/journal/export").status_code == 403
+    assert clients["caisse"].get("/siege/rapprochement/export").status_code == 403
     assert jpost(clients["siege"], "/api/siege/hq_down", {"down": True}).status_code == 403
     anon = A.app.test_client()
     assert anon.get("/siege").status_code == 302

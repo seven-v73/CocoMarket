@@ -13,7 +13,7 @@ provoquer une republication, mais l'idempotence empêche une double comptabilisa
 - dashboard siège et rapprochement par magasin ;
 - outbox SQLite locale ;
 - simulateur Python de caisse indépendant de Flask ;
-- RabbitMQ durable, publisher confirms, retry et DLQ ;
+- RabbitMQ durable avec files quorum, publisher confirms, retry et DLQ ;
 - idempotence des ventes ;
 - gestion des utilisateurs et rôles ;
 - catalogue et stocks administrables ;
@@ -61,8 +61,12 @@ stock et idempotence).
     source venv/bin/activate
     pip install -r requirements.txt
 
-Les commandes Makefile disponibles sont make install, make check, make test, make up,
-make down, make logs, make backup et make verify.
+Les commandes Makefile disponibles sont `make install`, `make check`,
+`make test`, `make reconcile`, `make up`, `make down`, `make logs`, `make backup` et
+`make verify`. `make reconcile` vérifie que les écarts sont expliqués par les
+ventes encore en attente. `make up` lance `docker-compose.services.yml` et nécessite
+les variables `COCO_SECRET`, `COCO_BOOTSTRAP_ADMIN_PASSWORD`,
+`RABBITMQ_USER`, `RABBITMQ_PASSWORD` et `POSTGRES_PASSWORD`.
 
 La composition Docker lance également Prometheus sur http://localhost:9090.
 Sa configuration se trouve dans monitoring/prometheus.yml et collecte
@@ -70,6 +74,8 @@ automatiquement /metrics du service web.
 Les règles de monitoring dans monitoring/alerts.yml signalent une DLQ non
 vide, une outbox qui s'accumule, une hausse anormale des tentatives d'envoi
 ou un web indisponible.
+Le guide d'industrialisation et de bascule se trouve dans
+[`PRODUCTION_HA.md`](PRODUCTION_HA.md).
 
 Sous PowerShell :
 
@@ -123,6 +129,7 @@ consommateur et trois agents caisse (ABJ01, BKE01 et KOR01).
     export COCO_BOOTSTRAP_ADMIN_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(18))')"
     export RABBITMQ_USER=cocomarket
     export RABBITMQ_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+    export POSTGRES_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
     docker compose -f docker-compose.services.yml up -d --build
 
 Arrêt :
@@ -189,6 +196,7 @@ Utilisateurs permet de créer, désactiver et réinitialiser les comptes.
     GET /health/live
     GET /health/ready
     GET /metrics
+    GET /siege/rapprochement/export
 
 `/health/live` indique que le processus répond ; `/health/ready` vérifie la
 base et le broker ; `/metrics` expose les ventes, l'outbox, les tentatives
@@ -196,17 +204,30 @@ d'envoi, le nombre d'attentes par magasin, la DLQ et les files RabbitMQ.
 Chaque réponse possède un `X-Request-ID` et les requêtes sont journalisées
 avec leur durée. Prometheus alerte sur la DLQ, l'accumulation d'outbox, les
 retry storms et l'indisponibilité du web.
+Le siège et l'administrateur peuvent exporter le rapprochement complet
+caisses/siège en CSV pour contrôle et archivage.
+Le contrôle CLI retourne le code 2 lorsqu'un écart n'est pas expliqué par
+l'outbox en attente ; `--strict` échoue également si des ventes sont encore
+en transit. `--json` fournit un résultat exploitable par une supervision
+externe.
 
 ## Sauvegardes
 
     python backup.py /var/backups/cocomarket
     python backup.py /var/backups/cocomarket --verify
+    python restore.py /var/backups/cocomarket /var/lib/cocomarket-restore
+    python reconcile.py
+    python reconcile.py --strict
+    python reconcile.py --json
 
 Sans `DATABASE_URL`, le script sauvegarde et vérifie `siege.db`, `caisse.db`
 et `broker.db` sans arrêter l'application. Avec PostgreSQL, il ajoute une
 sauvegarde native `siege-postgres-*.dump` via `pg_dump`; `--verify` contrôle
 le dernier dump avec `pg_restore`. Les outils PostgreSQL doivent être
 installés sur la machine qui lance la sauvegarde.
+`restore.py` vérifie l'intégrité avant restauration, écrit via un fichier
+temporaire puis refuse d'écraser une cible sans `--force`. Arrêter les
+services avant de restaurer dans leur répertoire de données réel.
 
 ## Tests
 
@@ -226,7 +247,7 @@ Le mode automatique de détection RabbitMQ possède aussi des tests dédiés.
 |---|---|---|
 | COCO_BROKER | rabbit | rabbit ou local |
 | RABBIT_URL | URL locale | URL AMQP |
-| COCO_RABBIT_QUEUE_PREFIX | cocomarket.v2 | Version des files |
+| COCO_RABBIT_QUEUE_PREFIX | cocomarket.v3 | Version des files quorum |
 | COCO_SECRET | aléatoire | Clé Flask |
 | COCO_BOOTSTRAP_ADMIN_PASSWORD | admin123 en développement | Mot de passe admin créé lors du premier démarrage |
 | COCO_SEED_DEMO_USERS | 1 en développement, 0 en production | Crée les comptes de démonstration supplémentaires |
@@ -269,6 +290,7 @@ catalogue ou le siège, puis utiliser Rejouer.
 ## Garanties actuelles
 
 - écriture locale avant publication ;
+- SQLite en WAL avec synchronisation `FULL` et attente des verrous concurrents ;
 - files RabbitMQ persistantes ;
 - publisher confirms ;
 - ACK après transaction siège ;
@@ -302,6 +324,8 @@ catalogue ou le siège, puis utiliser Rejouer.
     db.py                  schémas et accès SQLite
     broker/                RabbitMQ et broker local
     backup.py              sauvegarde et intégrité
+    restore.py             restauration SQLite contrôlée
+    reconcile.py            contrôle automatisé du rapprochement
     templates/             interfaces HTML
     static/                CSS, JavaScript, graphiques
     tests/                 tests fonctionnels

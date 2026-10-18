@@ -428,6 +428,38 @@ def api_overview():
     )
 
 
+@app.route("/siege/rapprochement/export")
+@login_required("siege", "admin")
+def reconciliation_export():
+    """Exporte le rapprochement global caisse/siège pour contrôle externe."""
+    with D.db("siege") as c:
+        stores = {r["code"]: r["name"] for r in c.execute("SELECT code,name FROM stores")}
+        received = {r["store"]: dict(r) for r in c.execute(
+            "SELECT store, COUNT(*) tickets_recus, COALESCE(SUM(total),0) ca_recu "
+            "FROM sales GROUP BY store"
+        )}
+    with D.db("caisse") as c:
+        emitted = {r["store"]: dict(r) for r in c.execute(
+            "SELECT store, COUNT(*) tickets_caisse, COALESCE(SUM(total),0) ca_caisse, "
+            "SUM(status='pending') tickets_en_attente, "
+            "COALESCE(SUM(CASE WHEN status='pending' THEN total ELSE 0 END),0) ca_en_attente "
+            "FROM outbox GROUP BY store"
+        )}
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(["magasin", "nom", "tickets_caisse", "tickets_recus", "tickets_en_attente",
+                     "ca_caisse", "ca_recu", "ca_en_attente", "ecart"])
+    for code, name in sorted(stores.items()):
+        e, r = emitted.get(code, {}), received.get(code, {})
+        caisse_total, received_total = e.get("ca_caisse", 0) or 0, r.get("ca_recu", 0) or 0
+        writer.writerow([code, name, e.get("tickets_caisse", 0) or 0, r.get("tickets_recus", 0) or 0,
+                         e.get("tickets_en_attente", 0) or 0, caisse_total, received_total,
+                         e.get("ca_en_attente", 0) or 0, caisse_total - received_total])
+    response = app.response_class(stream.getvalue(), mimetype="text/csv; charset=utf-8")
+    response.headers["Content-Disposition"] = "attachment; filename=cocomarket-rapprochement.csv"
+    return response
+
+
 @app.route("/api/siege/hq_down", methods=["POST"])
 @login_required("admin")
 def api_hq_down():

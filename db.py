@@ -61,7 +61,9 @@ def db(name):
     os.makedirs(DATA_DIR, exist_ok=True)
     c = sqlite3.connect(os.path.join(DATA_DIR, name + ".db"), timeout=30)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000")
     c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=FULL")
     try:
         yield c
         c.commit()

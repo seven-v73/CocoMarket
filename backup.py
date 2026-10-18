@@ -13,6 +13,8 @@ def backup_one(source, target):
     os.makedirs(os.path.dirname(target), exist_ok=True)
     src, dst = sqlite3.connect(source), sqlite3.connect(target)
     try:
+        # Inclut les pages encore présentes dans le WAL avant la copie.
+        src.execute("PRAGMA wal_checkpoint(PASSIVE)")
         src.backup(dst)
         result = dst.execute("PRAGMA integrity_check").fetchone()[0]
         if result != "ok":

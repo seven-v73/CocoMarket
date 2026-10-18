@@ -21,7 +21,7 @@
 
 <div class="grid g-main" style="margin-bottom:16px">
   <div class="card">
-    <h2><span class="section-icon amber">⌁</span> Rapprochement caisses ↔ siège</h2>
+    <div class="section-heading"><div><h2><span class="section-icon amber">⌁</span> Rapprochement caisses ↔ siège</h2></div><a class="btn ghost sm" href="{{ url_for('reconciliation_export') }}">Exporter CSV</a></div>
     <p class="muted" style="margin:-4px 0 10px;font-size:.85rem">Ce que les caisses ont enregistré face à ce que le siège a reçu. Un écart n'est jamais une vente perdue : c'est une vente encore en route.</p>
     <div class="scroll"><table>
       <thead><tr><th>Magasin</th><th>Liaison</th><th class="r">Tickets caisses</th><th class="r">Reçus siège</th><th class="r">CA caisses</th><th class="r">CA siège</th><th class="r">Écart</th><th>État</th></tr></thead>

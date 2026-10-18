@@ -47,12 +47,14 @@ class RabbitBroker:
 
     # ---------- topologie ----------
     def _declare(self, ch):
-        ch.queue_declare(self.DLQ, durable=True)
+        quorum = {"x-queue-type": "quorum"}
+        ch.queue_declare(self.DLQ, durable=True, arguments=quorum)
         for attempt, queue in enumerate(self.RETRIES, 1):
             ch.queue_declare(
                 queue,
                 durable=True,
                 arguments={
+                    **quorum,
                     "x-message-ttl": int(config.RETRY_DELAY * (2 ** (attempt - 1)) * 1000),
                     "x-dead-letter-exchange": "",
                     "x-dead-letter-routing-key": self.Q,
@@ -61,7 +63,7 @@ class RabbitBroker:
         ch.queue_declare(
             self.Q,
             durable=True,
-            arguments={"x-dead-letter-exchange": "", "x-dead-letter-routing-key": self.DLQ},
+            arguments={**quorum, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": self.DLQ},
         )
 
     def _connect(self):
@@ -219,7 +221,7 @@ class RabbitBroker:
         conn, ch = self._connect()
         try:
             q = ch.queue_declare(self.Q, passive=True, durable=True,
-                                 arguments={"x-dead-letter-exchange": "", "x-dead-letter-routing-key": self.DLQ})
+                                 arguments={"x-queue-type": "quorum", "x-dead-letter-exchange": "", "x-dead-letter-routing-key": self.DLQ})
             d = ch.queue_declare(self.DLQ, passive=True)
             return {"ready": q.method.message_count, "unacked": 0, "dlq": d.method.message_count}
         finally:

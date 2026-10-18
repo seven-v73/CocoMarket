@@ -9,7 +9,7 @@ BROKER = os.environ.get("COCO_BROKER", "rabbit").lower()
 if BROKER not in {"local", "rabbit"}:
     raise RuntimeError("COCO_BROKER doit valoir 'rabbit' ou 'local'")
 RABBIT_URL = os.environ.get("RABBIT_URL", "amqp://guest:guest@localhost:5672/%2F")
-RABBIT_QUEUE_PREFIX = os.environ.get("COCO_RABBIT_QUEUE_PREFIX", "cocomarket.v2")
+RABBIT_QUEUE_PREFIX = os.environ.get("COCO_RABBIT_QUEUE_PREFIX", "cocomarket.v3")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if ENV == "production" and ("guest:guest" in RABBIT_URL or not DATABASE_URL):
     raise RuntimeError("RABBIT_URL personnalisé et DATABASE_URL sont obligatoires en production")
